@@ -1,0 +1,1733 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sistema de Numeração de Documentos</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ── LOADING OVERLAY ── */
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg, #F4F3EF);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  transition: opacity 0.3s;
+}
+.loading-overlay.hidden { opacity: 0; pointer-events: none; }
+.loading-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid #E0DED7;
+  border-top-color: #18171A;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-text { font-size: 14px; color: #6A6870; font-family: -apple-system, sans-serif; }
+
+/* ── STATUS BADGE ── */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ccc;
+  display: inline-block;
+  margin-right: 5px;
+  transition: background 0.3s;
+}
+.status-dot.online  { background: #3B8A1F; box-shadow: 0 0 0 2px #c3e6a0; }
+.status-dot.offline { background: #cc4a00; box-shadow: 0 0 0 2px #ffd4b8; }
+.status-label { font-size: 12px; color: #6A6870; }
+
+:root {
+  --bg:        #F4F3EF;
+  --surface:   #FFFFFF;
+  --border:    #E0DED7;
+  --border2:   #C2C0B8;
+  --text:      #18171A;
+  --muted:     #6A6870;
+  --hint:      #9C9AA3;
+  --accent-bg: #18171A;
+  --accent-fg: #F4F3EF;
+  --success-bg:#E5F2DC;
+  --success:   #32600D;
+  --success-b: #B8D89C;
+  --warn-bg:   #FFF6DC;
+  --warn:      #7A5800;
+  --mono:      'Courier New', Courier, monospace;
+  --radius:    8px;
+  --radius-lg: 12px;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+/* ── TOPBAR ── */
+.topbar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 2rem;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 15px;
+}
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.topbar-year {
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 3px 12px;
+  font-family: var(--mono);
+}
+
+/* ── LAYOUT ── */
+.layout { display: flex; min-height: calc(100vh - 56px); }
+
+/* ── SIDEBAR ── */
+.sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 1.25rem 0;
+  position: sticky;
+  top: 56px;
+  height: calc(100vh - 56px);
+  overflow-y: auto;
+}
+.sidebar-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--hint);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 0 1.25rem;
+  margin-bottom: 6px;
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 1.25rem;
+  cursor: pointer;
+  transition: background 0.1s;
+  border-left: 3px solid transparent;
+  gap: 8px;
+}
+.nav-item:hover { background: var(--bg); }
+.nav-item.active {
+  background: var(--bg);
+  border-left-color: var(--text);
+}
+.nav-item-info { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.nav-item-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+.nav-item-next {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--mono);
+  margin-top: 1px;
+}
+.nav-badge {
+  font-size: 10px;
+  font-family: var(--mono);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1px 7px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.nav-item.active .nav-badge {
+  background: var(--text);
+  color: var(--accent-fg);
+  border-color: var(--text);
+}
+
+/* ── MAIN ── */
+.main { flex: 1; padding: 2rem 1.5rem 4rem; min-width: 0; }
+
+/* ── PAGE HEADER ── */
+.page-header { margin-bottom: 1.5rem; }
+.page-header h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+.page-header p { font-size: 13px; color: var(--muted); margin-top: 3px; }
+
+/* ── STATS ── */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 1.5rem;
+}
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0.875rem 1rem;
+}
+.stat-card .slabel {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.stat-card .sval {
+  font-size: 20px;
+  font-weight: 700;
+  font-family: var(--mono);
+}
+
+/* ── EMIT CARD ── */
+.emit-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+}
+.next-num-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.875rem 1.125rem;
+  margin-bottom: 1.25rem;
+}
+.next-icon {
+  width: 42px;
+  height: 42px;
+  background: var(--accent-bg);
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.next-num-bar .nlabel {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 2px;
+}
+.next-num-bar .nval {
+  font-size: 26px;
+  font-weight: 700;
+  font-family: var(--mono);
+  letter-spacing: 0.03em;
+}
+
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 1rem; }
+.form-group { display: flex; flex-direction: column; gap: 5px; }
+.form-group label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.form-group input {
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.form-group input:focus {
+  border-color: var(--border2);
+  box-shadow: 0 0 0 3px rgba(24,23,26,0.08);
+  background: var(--surface);
+}
+.form-group input::placeholder { color: var(--hint); }
+
+.btn-emit {
+  width: 100%;
+  height: 42px;
+  background: var(--accent-bg);
+  color: var(--accent-fg);
+  border: none;
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity 0.15s, transform 0.1s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.btn-emit:hover:not(:disabled) { opacity: 0.82; }
+.btn-emit:active:not(:disabled) { transform: scale(0.99); }
+.btn-emit:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* ── HISTORY ── */
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+.section-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.history-controls { display: flex; gap: 8px; align-items: center; }
+.search-input {
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  width: 200px;
+  transition: border-color 0.15s, width 0.2s;
+}
+.search-input:focus { border-color: var(--border2); width: 240px; }
+.search-input::placeholder { color: var(--hint); }
+.btn-export {
+  height: 34px;
+  padding: 0 14px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--muted);
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.btn-export:hover { background: var(--surface); color: var(--text); border-color: var(--border2); }
+
+.history-table-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+table { width: 100%; border-collapse: collapse; min-width: 860px; }
+thead th {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding: 9px 10px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+thead th.col-num  { width: 100px; }
+thead th.col-date { width: 105px; }
+thead th.col-dje  { width: 100px; }
+thead th.col-pub  { width: 115px; }
+thead th.col-unit { width: 110px; }
+tbody tr { border-bottom: 1px solid var(--border); transition: background 0.1s; }
+tbody tr:last-child { border-bottom: none; }
+tbody tr:hover { background: var(--bg); }
+tbody td { padding: 8px 10px; font-size: 13px; vertical-align: middle; }
+
+.num-pill {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 9px;
+  letter-spacing: 0.03em;
+}
+.td-name { font-weight: 500; }
+.td-unit { color: var(--muted); font-size: 13px; }
+.td-date { font-size: 12px; color: var(--hint); font-family: var(--mono); white-space: nowrap; }
+
+.proad-cell { display: flex; align-items: center; gap: 6px; }
+.proad-value {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--success);
+  background: var(--success-bg);
+  border: 1px solid var(--success-b);
+  border-radius: 6px;
+  padding: 3px 9px;
+}
+.btn-proad {
+  height: 26px;
+  padding: 0 8px;
+  background: transparent;
+  border: 1px dashed var(--border2);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.btn-proad:hover { background: var(--bg); border-color: var(--text); color: var(--text); border-style: solid; }
+.btn-proad-edit {
+  height: 26px;
+  padding: 0 8px;
+  background: transparent;
+  border: none;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  border-radius: 4px;
+  transition: background 0.12s;
+}
+.btn-proad-edit:hover { background: var(--bg); color: var(--text); }
+.empty-row td { text-align: center; padding: 3rem; color: var(--muted); font-size: 13px; }
+
+/* ── DJE ── */
+.dje-cell { display: flex; flex-direction: column; gap: 5px; }
+.dje-value {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: #1a5cb0;
+  background: #e8f0fd;
+  border: 1px solid #b3cdf7;
+  border-radius: 6px;
+  padding: 3px 9px;
+  display: inline-block;
+}
+.btn-dje {
+  height: 26px;
+  padding: 0 8px;
+  background: transparent;
+  border: 1px dashed var(--border2);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.btn-dje:hover { background: var(--bg); border-color: #1a5cb0; color: #1a5cb0; border-style: solid; }
+.btn-dje-edit {
+  height: 22px;
+  padding: 0 7px;
+  background: transparent;
+  border: none;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  border-radius: 4px;
+  transition: background 0.12s;
+}
+.btn-dje-edit:hover { background: var(--bg); color: var(--text); }
+
+/* badge publicado */
+.badge-pub {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 20px;
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.badge-pub.publicado {
+  background: var(--success-bg);
+  color: var(--success);
+  border: 1px solid var(--success-b);
+}
+.badge-pub.publicado:hover { background: #d4edbb; }
+.badge-pub.nao-publicado {
+  background: var(--warn-bg);
+  color: var(--warn);
+  border: 1px solid #e8d080;
+}
+.badge-pub.nao-publicado:hover { background: #ffe9a0; }
+
+/* Modal DJE */
+.dje-modal-ref {
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 5px 12px;
+  display: inline-block;
+  margin-bottom: 1rem;
+}
+.dje-input-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 1rem; }
+.dje-input-group label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.dje-input-group input {
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  font-family: var(--mono);
+  font-weight: 700;
+  outline: none;
+  letter-spacing: 0.03em;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.dje-input-group input:focus {
+  border-color: #1a5cb0;
+  box-shadow: 0 0 0 3px rgba(26,92,176,0.1);
+  background: var(--surface);
+}
+.dje-input-group input::placeholder { color: var(--hint); font-weight: 400; font-size: 14px; letter-spacing: 0; }
+
+/* toggle publicado no modal */
+.pub-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  margin-bottom: 1.25rem;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.pub-toggle-row:hover { border-color: var(--border2); }
+.pub-toggle-label { font-size: 14px; font-weight: 500; color: var(--text); }
+.pub-toggle-sub { font-size: 12px; color: var(--muted); margin-top: 1px; }
+.toggle-switch {
+  width: 42px;
+  height: 24px;
+  background: var(--border2);
+  border-radius: 12px;
+  position: relative;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+.toggle-switch.on { background: var(--success); }
+.toggle-switch::after {
+  content: '';
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  background: white;
+  border-radius: 50%;
+  top: 3px;
+  left: 3px;
+  transition: left 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.toggle-switch.on::after { left: 21px; }
+
+/* ── MODALS ── */
+.modal-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(10,10,10,0.45);
+  z-index: 300;
+  align-items: center;
+  justify-content: center;
+}
+.modal-backdrop.open { display: flex; }
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.75rem;
+  width: 400px;
+  max-width: 92vw;
+  animation: pop 0.18s ease;
+}
+@keyframes pop { from { transform: scale(0.94); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.modal-icon {
+  width: 46px;
+  height: 46px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1rem;
+}
+.modal h2 { font-size: 16px; font-weight: 700; margin-bottom: 0.35rem; }
+.modal .modal-sub { font-size: 13px; color: var(--muted); margin-bottom: 1rem; }
+.modal-info {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.875rem 1rem;
+  margin-bottom: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.modal-info-row { display: flex; justify-content: space-between; align-items: center; }
+.modal-info-row .key { font-size: 12px; color: var(--muted); }
+.modal-info-row .val { font-size: 13px; font-weight: 500; font-family: var(--mono); text-align: right; max-width: 60%; }
+.modal-info-row .val.big { font-size: 20px; font-weight: 700; letter-spacing: 0.04em; }
+.modal-divider { height: 1px; background: var(--border); }
+.modal p.warn { font-size: 13px; color: var(--muted); margin-bottom: 1.25rem; }
+.modal-actions { display: flex; gap: 8px; }
+
+.proad-modal-ref {
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 5px 12px;
+  display: inline-block;
+  margin-bottom: 1rem;
+}
+.proad-input-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 1.25rem; }
+.proad-input-group label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.proad-input-group input {
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  font-family: var(--mono);
+  font-weight: 700;
+  outline: none;
+  letter-spacing: 0.03em;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.proad-input-group input:focus {
+  border-color: var(--border2);
+  box-shadow: 0 0 0 3px rgba(24,23,26,0.08);
+  background: var(--surface);
+}
+.proad-input-group input::placeholder { color: var(--hint); font-weight: 400; font-size: 14px; letter-spacing: 0; }
+
+.btn-cancel {
+  flex: 1;
+  height: 40px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 14px;
+  cursor: pointer;
+  color: var(--text);
+  font-family: inherit;
+  transition: background 0.15s;
+}
+.btn-cancel:hover { background: var(--bg); }
+.btn-confirm {
+  flex: 1;
+  height: 40px;
+  background: var(--accent-bg);
+  color: var(--accent-fg);
+  border: none;
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity 0.15s;
+}
+.btn-confirm:hover { opacity: 0.85; }
+.btn-confirm:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* ── RESERVA ── */
+.qty-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 1rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+}
+.qty-label { font-size: 13px; color: var(--muted); flex: 1; }
+.qty-label strong { color: var(--text); }
+.qty-controls { display: flex; align-items: center; gap: 8px; }
+.qty-btn {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, border-color 0.12s;
+  font-family: inherit;
+}
+.qty-btn:hover { background: var(--border); border-color: var(--border2); }
+.qty-input {
+  width: 64px;
+  height: 32px;
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  font-family: var(--mono);
+  outline: none;
+}
+.qty-input:focus { border-color: var(--border2); box-shadow: 0 0 0 3px rgba(24,23,26,0.08); }
+
+.badge-reservado {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--warn-bg);
+  color: var(--warn);
+  border: 1px solid #e8d080;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.bloco-range {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--mono);
+  margin-top: 2px;
+}
+
+/* ── TOAST ── */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(80px);
+  background: var(--text);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 11px 20px;
+  border-radius: 30px;
+  z-index: 999;
+  opacity: 0;
+  transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1), opacity 0.25s;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ── RESPONSIVE ── */
+@media (max-width: 720px) {
+  .sidebar { display: none; }
+  .main { padding: 1rem 1rem 3rem; }
+  .form-row { grid-template-columns: 1fr; }
+  .stats-row { grid-template-columns: 1fr 1fr; }
+  .stats-row .stat-card:last-child { grid-column: span 2; }
+  thead th.col-unit, tbody td.col-unit { display: none; }
+  .history-header { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .search-input, .search-input:focus { width: 100%; }
+
+  /* Mobile: botão de menu */
+  .mobile-nav { display: block; }
+}
+@media (min-width: 721px) { .mobile-nav { display: none; } }
+
+.mobile-nav-btn {
+  height: 34px;
+  padding: 0 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--muted);
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Mobile sidebar overlay */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(10,10,10,0.4);
+}
+.sidebar-overlay.open { display: block; }
+.sidebar-mobile {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 280px;
+  background: var(--surface);
+  z-index: 201;
+  overflow-y: auto;
+  transform: translateX(-100%);
+  transition: transform 0.25s ease;
+  padding-top: 1.25rem;
+}
+.sidebar-mobile.open { transform: translateX(0); }
+</style>
+</head>
+<body>
+
+<div class="loading-overlay" id="loading-overlay">
+  <div class="loading-spinner"></div>
+  <div class="loading-text">Conectando ao banco de dados...</div>
+</div>
+
+<header class="topbar">
+  <div class="topbar-brand">
+    <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+      <rect x="2" y="1" width="14" height="18" rx="2" stroke="#18171A" stroke-width="1.5"/>
+      <path d="M5 6h8M5 9.5h8M5 13h5" stroke="#18171A" stroke-width="1.5" stroke-linecap="round"/>
+      <circle cx="17" cy="16" r="4" fill="#18171A"/>
+      <path d="M15.5 16l1 1 2-2" stroke="#F4F3EF" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    Sistema de Numeração
+  </div>
+  <div class="topbar-right">
+    <span class="status-label"><span class="status-dot" id="status-dot"></span><span id="status-text">Conectando...</span></span>
+    <span class="topbar-year" id="topbar-year">2026</span>
+    <div class="mobile-nav">
+      <button class="mobile-nav-btn" onclick="openMobileMenu()">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path d="M1 3h12M1 7h12M1 11h12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+        Documentos
+      </button>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- Sidebar Desktop -->
+  <nav class="sidebar" id="sidebar-desktop">
+    <div class="sidebar-label" style="margin-bottom:10px;">Tipo de Documento</div>
+    <!-- nav items gerados via JS -->
+  </nav>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="page-header">
+      <h1 id="ph-title">—</h1>
+      <p id="ph-sub">—</p>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="slabel">Emitidos em <span id="stat-ano">2026</span></div>
+        <div class="sval" id="stat-total">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="slabel">Último emitido</div>
+        <div class="sval" id="stat-ultimo">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="slabel">Próximo número</div>
+        <div class="sval" id="stat-proximo">001/2026</div>
+      </div>
+    </div>
+
+    <div class="emit-card">
+      <div class="next-num-bar">
+        <div class="next-icon">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+            <path d="M10 4v12M4 10h12" stroke="#F4F3EF" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div>
+          <div class="nlabel">Próximo número disponível</div>
+          <div class="nval" id="num-display">001/2026</div>
+        </div>
+      </div>
+      <div class="qty-row">
+        <div class="qty-label">Quantidade de números a reservar: <strong id="qty-preview-range">—</strong></div>
+        <div class="qty-controls">
+          <button class="qty-btn" id="btn-qty-minus" onclick="changeQty(-1)">−</button>
+          <input class="qty-input" type="number" id="inp-qty" value="1" min="1" max="500" />
+          <button class="qty-btn" id="btn-qty-plus" onclick="changeQty(1)">+</button>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="inp-solicitante">Nome do solicitante</label>
+          <input type="text" id="inp-solicitante" placeholder="Ex: Maria Silva" autocomplete="off" />
+        </div>
+        <div class="form-group">
+          <label for="inp-unidade">Unidade</label>
+          <input type="text" id="inp-unidade" placeholder="Ex: Coordenação de Assessoramento da Presidência" autocomplete="off" />
+        </div>
+      </div>
+      <button class="btn-emit" id="btn-emit" disabled>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M2 8h12M8 2l6 6-6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span id="btn-emit-label">Reservar número</span>
+      </button>
+    </div>
+
+    <div class="history-header">
+      <span class="section-title" id="hist-title">Histórico</span>
+      <div class="history-controls">
+        <input class="search-input" type="text" id="inp-busca" placeholder="Buscar..." />
+        <button class="btn-export" id="btn-export">
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+            <path d="M7 1v8M4 6l3 3 3-3M2 10v1a1 1 0 001 1h8a1 1 0 001-1v-1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Exportar CSV
+        </button>
+      </div>
+    </div>
+
+    <div class="history-table-wrap">
+      <table id="main-table">
+        <thead>
+          <tr>
+            <th class="col-num" id="th-num">Número</th>
+            <th>Solicitante</th>
+            <th class="col-unit">Unidade</th>
+            <th>Nº PROAD</th>
+            <th class="col-dje" id="th-dje" style="display:none">Nº DJE</th>
+            <th class="col-pub" id="th-pub" style="display:none">Publicado</th>
+            <th class="col-date">Data / Hora</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </main>
+</div>
+
+<!-- Sidebar Mobile Overlay -->
+<div class="sidebar-overlay" id="sidebar-overlay" onclick="closeMobileMenu()"></div>
+<nav class="sidebar-mobile" id="sidebar-mobile">
+  <div class="sidebar-label" style="margin: 0 1.25rem 10px;">Tipo de Documento</div>
+</nav>
+
+<!-- Modal: confirmar emissão -->
+<div class="modal-backdrop" id="modal-emit" role="dialog" aria-modal="true">
+  <div class="modal">
+    <div class="modal-icon">
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+        <path d="M11 7v5M11 15h.01" stroke="#18171A" stroke-width="1.8" stroke-linecap="round"/>
+        <path d="M2 11a9 9 0 1018 0 9 9 0 00-18 0z" stroke="#18171A" stroke-width="1.5"/>
+      </svg>
+    </div>
+    <h2>Confirmar reserva</h2>
+    <p class="modal-sub">Os números abaixo serão reservados permanentemente.</p>
+    <div class="modal-info">
+      <div class="modal-info-row">
+        <span class="key">Tipo</span>
+        <span class="val" id="modal-tipo">—</span>
+      </div>
+      <div class="modal-divider"></div>
+      <div class="modal-info-row">
+        <span class="key">Quantidade</span>
+        <span class="val big" id="modal-qty">1</span>
+      </div>
+      <div class="modal-info-row">
+        <span class="key">Intervalo</span>
+        <span class="val" id="modal-range">001/2026</span>
+      </div>
+      <div class="modal-divider"></div>
+      <div class="modal-info-row">
+        <span class="key">Solicitante</span>
+        <span class="val" id="modal-sol">—</span>
+      </div>
+      <div class="modal-info-row">
+        <span class="key">Unidade</span>
+        <span class="val" id="modal-uni">—</span>
+      </div>
+    </div>
+    <p class="warn">Esta ação é permanente. Os números não poderão ser reutilizados.</p>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="btn-emit-cancel">Cancelar</button>
+      <button class="btn-confirm" id="btn-emit-confirm">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: vincular PROAD -->
+<div class="modal-backdrop" id="modal-proad" role="dialog" aria-modal="true">
+  <div class="modal">
+    <div class="modal-icon">
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+        <path d="M4 11h14M11 4l7 7-7 7" stroke="#18171A" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <h2>Vincular nº de PROAD</h2>
+    <p class="modal-sub">Documento:</p>
+    <div class="proad-modal-ref" id="proad-modal-ref">—</div>
+    <div class="proad-input-group">
+      <label for="inp-proad">Número do PROAD</label>
+      <input type="text" id="inp-proad" placeholder="Ex: 00100.000123/2026-01" autocomplete="off" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="btn-proad-cancel">Cancelar</button>
+      <button class="btn-confirm" id="btn-proad-confirm" disabled>Salvar PROAD</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: DJE -->
+<div class="modal-backdrop" id="modal-dje" role="dialog" aria-modal="true">
+  <div class="modal">
+    <div class="modal-icon">
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+        <rect x="3" y="2" width="13" height="17" rx="2" stroke="#18171A" stroke-width="1.5"/>
+        <path d="M6 7h7M6 10.5h7M6 14h4" stroke="#18171A" stroke-width="1.4" stroke-linecap="round"/>
+        <circle cx="17" cy="17" r="4" fill="#1a5cb0"/>
+        <path d="M15.5 17h3M17 15.5v3" stroke="white" stroke-width="1.3" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <h2>Diário da Justiça Eletrônico</h2>
+    <p class="modal-sub">Decreto:</p>
+    <div class="dje-modal-ref" id="dje-modal-ref">—</div>
+
+    <div class="dje-input-group">
+      <label for="inp-dje">Número do DJE</label>
+      <input type="text" id="inp-dje" placeholder="Ex: 3842" autocomplete="off" />
+    </div>
+
+    <div class="pub-toggle-row" id="pub-toggle-row" onclick="togglePublicado()">
+      <div>
+        <div class="pub-toggle-label">Publicado no DJE</div>
+        <div class="pub-toggle-sub" id="pub-toggle-sub">Clique para marcar como publicado</div>
+      </div>
+      <div class="toggle-switch" id="toggle-switch"></div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-cancel" id="btn-dje-cancel">Cancelar</button>
+      <button class="btn-confirm" id="btn-dje-confirm">Salvar DJE</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- Firebase SDK -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getDatabase, ref, onValue, get, set, push, update, runTransaction, serverTimestamp, onDisconnect, goOnline, goOffline } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+/* ── FIREBASE CONFIG ── */
+const firebaseConfig = {
+  apiKey: "AIzaSyBxjbTfohqyU9toBiv2ZN5a9FK6MkZaHEc",
+  authDomain: "decretos-21b56.firebaseapp.com",
+  databaseURL: "https://decretos-21b56-default-rtdb.firebaseio.com",
+  projectId: "decretos-21b56",
+  storageBucket: "decretos-21b56.firebasestorage.app",
+  messagingSenderId: "705665891839",
+  appId: "1:705665891839:web:3670f27417a89f6c857bca",
+  measurementId: "G-8P4WDZK0D8"
+};
+
+const app = initializeApp(firebaseConfig);
+const db  = getDatabase(app);
+
+/* ── TIPOS DE DOCUMENTO ── */
+const TIPOS = [
+  { id: 'decreto',          label: 'Decreto Judiciário',              abbr: 'DEC.JUD' },
+  { id: 'despacho',         label: 'Despacho / Of. Circ. Presidente', abbr: 'DESP/OFC' },
+  { id: 'edital',           label: 'Edital',                         abbr: 'EDITAL' },
+  { id: 'apostila',         label: 'Apostila',                       abbr: 'APOSTILA' },
+  { id: 'portaria',         label: 'Portaria',                       abbr: 'PORTARIA' },
+  { id: 'portaria-conj',    label: 'Portaria Conjunta',              abbr: 'PORT.CONJ' },
+  { id: 'recomendacao',     label: 'Recomendação',                   abbr: 'RECOM' },
+  { id: 'recomendacao-conj',label: 'Recomendação Conjunta',          abbr: 'RECOM.CONJ' },
+  { id: 'provimento-conj',  label: 'Provimento Conjunto',            abbr: 'PROV.CONJ' },
+  { id: 'ordem-servico',    label: 'Ordem de Serviço',               abbr: 'OS' },
+];
+
+let state = {}; // { [tipoId]: { ano, ultimo, docs: {} } }
+let activeType = TIPOS[0].id;
+let pendingEmit = null;
+let pendingProad = null;
+
+/* ── UTILS ── */
+function anoAtual() { return new Date().getFullYear(); }
+function formatNum(n, ano) { return String(n).padStart(3, '0') + '/' + ano; }
+function esc(s) {
+  return String(s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+
+/* ── STATUS ONLINE/OFFLINE ── */
+function setStatus(online) {
+  const dot  = document.getElementById('status-dot');
+  const text = document.getElementById('status-text');
+  dot.className  = 'status-dot ' + (online ? 'online' : 'offline');
+  text.textContent = online ? 'Online' : 'Sem conexão';
+}
+
+const connRef = ref(db, '.info/connected');
+onValue(connRef, snap => setStatus(snap.val() === true));
+
+/* ── FIREBASE: OUVIR DADOS EM TEMPO REAL ── */
+function initFirebase() {
+  TIPOS.forEach(t => {
+    state[t.id] = { ano: anoAtual(), ultimo: 0, docs: {} };
+  });
+
+  const rootRef = ref(db, 'sistema');
+  onValue(rootRef, snap => {
+    const data = snap.val() || {};
+    TIPOS.forEach(t => {
+      const ts = data[t.id] || {};
+      state[t.id] = {
+        ano:    ts.ano    || anoAtual(),
+        ultimo: ts.ultimo || 0,
+        docs:   ts.docs   || {}
+      };
+    });
+
+    // Esconder loading na primeira carga
+    const overlay = document.getElementById('loading-overlay');
+    if (overlay && !overlay.classList.contains('hidden')) {
+      overlay.classList.add('hidden');
+      setTimeout(() => overlay.remove(), 400);
+    }
+
+    buildNav(document.getElementById('sidebar-desktop'));
+    buildNav(document.getElementById('sidebar-mobile'));
+    updateQtyPreview();
+    render();
+  });
+}
+
+function getTypeState() { return state[activeType]; }
+
+/* ── FIREBASE: SALVAR ── */
+async function saveTypeState() {
+  const ts = getTypeState();
+  await set(ref(db, `sistema/${activeType}`), {
+    ano:    ts.ano,
+    ultimo: ts.ultimo,
+    docs:   ts.docs
+  });
+}
+
+/* ── FIREBASE: RESERVAR NÚMEROS (transação atômica) ── */
+async function reservarNumeros(solicitante, unidade, qty) {
+  const tipoRef = ref(db, `sistema/${activeType}`);
+  const ano = anoAtual();
+  let numerosReservados = [];
+
+  await runTransaction(tipoRef, (current) => {
+    if (!current) current = { ano, ultimo: 0, docs: {} };
+    if (current.ano !== ano) { current.ultimo = 0; current.ano = ano; }
+    if (!current.docs) current.docs = {};
+
+    const blocoId = qty > 1 ? Date.now() : null;
+    const now = Date.now();
+    numerosReservados = [];
+
+    for (let i = 0; i < qty; i++) {
+      current.ultimo += 1;
+      const num = formatNum(current.ultimo, ano);
+      const key = `doc_${current.ultimo}_${ano}`;
+      current.docs[key] = {
+        numero: num,
+        seq: current.ultimo,
+        ano,
+        solicitante,
+        unidade,
+        proad: '',
+        dje: '',
+        publicado: false,
+        ts: now + i,
+        bloco: blocoId
+      };
+      numerosReservados.push(num);
+    }
+    return current;
+  });
+
+  return numerosReservados;
+}
+
+/* ── FIREBASE: SALVAR PROAD ── */
+async function salvarProad(docKey, valor) {
+  await set(ref(db, `sistema/${activeType}/docs/${docKey}/proad`), valor);
+}
+
+/* ── FIREBASE: SALVAR DJE ── */
+async function salvarDJE(docKey, dje, publicado) {
+  await update(ref(db, `sistema/${activeType}/docs/${docKey}`), { dje, publicado });
+}
+
+/* ── FIREBASE: TOGGLE PUBLICADO ── */
+async function togglePublicadoFirebase(docKey, novoValor) {
+  await set(ref(db, `sistema/${activeType}/docs/${docKey}/publicado`), novoValor);
+}
+
+function getDocKey(idx) {
+  const ts = getTypeState();
+  const docs = Object.entries(ts.docs).sort((a,b) => b[1].seq - a[1].seq);
+  return docs[idx]?.[0] || null;
+}
+
+/* ── PROXIMO ── */
+function proximo() {
+  const ano = anoAtual();
+  const ts = getTypeState();
+  if (ts.ano !== ano) return formatNum(1, ano);
+  return formatNum(ts.ultimo + 1, ano);
+}
+
+/* ── NAV ── */
+function buildNav(container) {
+  container.innerHTML = '';
+  const ano = anoAtual();
+  TIPOS.forEach(t => {
+    const ts = state[t.id] || { ano, ultimo: 0, docs: {} };
+    const docs = Object.values(ts.docs || {});
+    const count = docs.filter(d => d.ano === ano).length;
+    const next = ts.ano !== ano ? formatNum(1, ano) : formatNum(ts.ultimo + 1, ano);
+    const el = document.createElement('div');
+    el.className = 'nav-item' + (t.id === activeType ? ' active' : '');
+    el.dataset.id = t.id;
+    el.innerHTML = `
+      <div class="nav-item-info">
+        <span class="nav-item-name">${esc(t.label)}</span>
+        <span class="nav-item-next">Próx: ${esc(next)}</span>
+      </div>
+      <span class="nav-badge">${count}</span>
+    `;
+    el.addEventListener('click', () => {
+      selectType(t.id);
+      closeMobileMenu();
+    });
+    container.appendChild(el);
+  });
+}
+
+function selectType(id) {
+  activeType = id;
+  buildNav(document.getElementById('sidebar-desktop'));
+  buildNav(document.getElementById('sidebar-mobile'));
+  render();
+  document.getElementById('inp-busca').value = '';
+  document.getElementById('inp-solicitante').value = '';
+  document.getElementById('inp-unidade').value = '';
+  document.getElementById('inp-qty').value = 1;
+  document.getElementById('btn-emit').disabled = true;
+  updateQtyPreview();
+}
+
+/* ── RENDER ── */
+function render() {
+  const tipo = TIPOS.find(t => t.id === activeType);
+  const ts = getTypeState();
+  const ano = anoAtual();
+  const p = proximo();
+  const docs = Object.values(ts.docs || {});
+  const isDecreto = activeType === 'decreto';
+
+  document.getElementById('topbar-year').textContent = ano;
+  document.getElementById('ph-title').textContent = tipo.label;
+  document.getElementById('ph-sub').textContent = `Gerador de números — ${tipo.abbr}`;
+  document.getElementById('num-display').textContent = p;
+  document.getElementById('stat-proximo').textContent = p;
+  document.getElementById('stat-ano').textContent = ano;
+  document.getElementById('stat-total').textContent = docs.filter(d => d.ano === ano).length;
+  document.getElementById('stat-ultimo').textContent = ts.ultimo > 0 ? formatNum(ts.ultimo, ts.ano) : '—';
+  document.getElementById('th-num').textContent = tipo.label;
+  document.getElementById('hist-title').textContent = `Histórico — ${tipo.label}`;
+
+  // Mostrar/ocultar colunas DJE e Publicado
+  const djeDisplay = isDecreto ? '' : 'none';
+  document.getElementById('th-dje').style.display = djeDisplay;
+  document.getElementById('th-pub').style.display = djeDisplay;
+
+  renderTable();
+}
+
+function renderTable(filtro) {
+  const tbody = document.getElementById('tbody');
+  const ts = getTypeState();
+  let items = Object.entries(ts.docs || {})
+    .map(([key, d]) => ({...d, _key: key}))
+    .sort((a, b) => b.seq - a.seq);
+
+  if (filtro) {
+    const f = filtro.toLowerCase();
+    items = items.filter(d =>
+      d.numero.toLowerCase().includes(f) ||
+      d.solicitante.toLowerCase().includes(f) ||
+      d.unidade.toLowerCase().includes(f) ||
+      (d.proad || '').toLowerCase().includes(f)
+    );
+  }
+
+  if (!items.length) {
+    const cols = activeType === 'decreto' ? 7 : 5;
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="${cols}">${filtro ? 'Nenhum resultado encontrado.' : 'Nenhum documento emitido ainda.'}</td></tr>`;
+    return;
+  }
+
+  const isDecreto = activeType === 'decreto';
+
+  tbody.innerHTML = items.map(d => {
+    const dt = new Date(d.ts);
+    const dataStr = dt.toLocaleDateString('pt-BR') + ' ' + dt.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+    const blocoTag = d.bloco ? `<span class="badge-reservado">bloco</span>` : '';
+    const proadCell = d.proad
+      ? `<div class="proad-cell">
+           <span class="proad-value">${esc(d.proad)}</span>
+           <button class="btn-proad-edit" onclick="openProadModal('${d._key}')" title="Editar PROAD">✎</button>
+         </div>`
+      : `<div class="proad-cell">
+           <button class="btn-proad" onclick="openProadModal('${d._key}')">
+             <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M1 6h10M6 1l5 5-5 5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+             Vincular PROAD
+           </button>
+         </div>`;
+
+    const djeCells = isDecreto ? `
+      <td class="col-dje">
+        ${d.dje
+          ? `<div class="dje-cell"><span class="dje-value">DJE ${esc(d.dje)}</span><button class="btn-dje-edit" onclick="openDjeModal('${d._key}')" title="Editar DJE">✎</button></div>`
+          : `<div class="dje-cell"><button class="btn-dje" onclick="openDjeModal('${d._key}')">
+               <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M1 6h10M6 1l5 5-5 5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+               Vincular DJE
+             </button></div>`
+        }
+      </td>
+      <td class="col-pub">
+        <button class="badge-pub ${d.publicado ? 'publicado' : 'nao-publicado'}"
+          onclick="quickTogglePublicado('${d._key}', ${!!d.publicado})">
+          ${d.publicado ? '✓ Publicado' : '✗ Não publicado'}
+        </button>
+      </td>` : '';
+
+    return `<tr>
+      <td><span class="num-pill">${esc(d.numero)}</span>${blocoTag}</td>
+      <td class="td-name">${esc(d.solicitante)}</td>
+      <td class="col-unit td-unit">${esc(d.unidade)}</td>
+      <td>${proadCell}</td>
+      ${djeCells}
+      <td class="td-date">${dataStr}</td>
+    </tr>`;
+  }).join('');
+}
+
+/* ── QUANTIDADE ── */
+function getQty() {
+  const v = parseInt(document.getElementById('inp-qty').value, 10);
+  return isNaN(v) || v < 1 ? 1 : v > 500 ? 500 : v;
+}
+function changeQty(delta) {
+  const inp = document.getElementById('inp-qty');
+  let v = parseInt(inp.value, 10) || 1;
+  v = Math.max(1, Math.min(500, v + delta));
+  inp.value = v;
+  updateQtyPreview();
+}
+function updateQtyPreview() {
+  const qty = getQty();
+  const ano = anoAtual();
+  const ts = getTypeState();
+  const base = ts.ano !== ano ? 1 : ts.ultimo + 1;
+  const fim = base + qty - 1;
+  const tipo = TIPOS.find(t => t.id === activeType);
+  const label = qty === 1
+    ? formatNum(base, ano)
+    : `${formatNum(base, ano)} → ${formatNum(fim, ano)}`;
+  document.getElementById('qty-preview-range').textContent = label;
+  document.getElementById('btn-emit-label').textContent =
+    qty === 1 ? `Reservar 1 número de ${tipo.label}` : `Reservar ${qty} números de ${tipo.label}`;
+}
+document.getElementById('inp-qty').addEventListener('input', () => {
+  let v = parseInt(document.getElementById('inp-qty').value, 10);
+  if (v > 500) document.getElementById('inp-qty').value = 500;
+  if (v < 1 || isNaN(v)) document.getElementById('inp-qty').value = 1;
+  updateQtyPreview();
+});
+
+/* ── FORM ── */
+function checkForm() {
+  const ok = document.getElementById('inp-solicitante').value.trim() &&
+             document.getElementById('inp-unidade').value.trim();
+  document.getElementById('btn-emit').disabled = !ok;
+}
+document.getElementById('inp-solicitante').addEventListener('input', checkForm);
+document.getElementById('inp-unidade').addEventListener('input', checkForm);
+document.getElementById('inp-solicitante').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('inp-unidade').focus();
+});
+document.getElementById('inp-unidade').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !document.getElementById('btn-emit').disabled) openEmitModal();
+});
+document.getElementById('btn-emit').addEventListener('click', openEmitModal);
+
+/* ── MODAL EMIT ── */
+function openEmitModal() {
+  const s = document.getElementById('inp-solicitante').value.trim();
+  const u = document.getElementById('inp-unidade').value.trim();
+  if (!s || !u) return;
+  const tipo = TIPOS.find(t => t.id === activeType);
+  const ano = anoAtual();
+  const ts = getTypeState();
+  const qty = getQty();
+  const base = ts.ano !== ano ? 1 : ts.ultimo + 1;
+  const fim = base + qty - 1;
+  pendingEmit = { qty, base, fim, solicitante: s, unidade: u };
+  document.getElementById('modal-tipo').textContent = tipo.label;
+  document.getElementById('modal-qty').textContent = qty;
+  document.getElementById('modal-range').textContent = qty === 1
+    ? formatNum(base, ano)
+    : `${formatNum(base, ano)} → ${formatNum(fim, ano)}`;
+  document.getElementById('modal-sol').textContent = s;
+  document.getElementById('modal-uni').textContent = u;
+  document.getElementById('modal-emit').classList.add('open');
+  document.getElementById('btn-emit-confirm').focus();
+}
+
+document.getElementById('btn-emit-cancel').addEventListener('click', () => {
+  document.getElementById('modal-emit').classList.remove('open');
+  pendingEmit = null;
+});
+document.getElementById('modal-emit').addEventListener('click', function(e) {
+  if (e.target === this) { this.classList.remove('open'); pendingEmit = null; }
+});
+
+document.getElementById('btn-emit-confirm').addEventListener('click', async function() {
+  if (!pendingEmit) return;
+  const tipo = TIPOS.find(t => t.id === activeType);
+  const { qty, solicitante, unidade } = pendingEmit;
+
+  // Desabilitar botão durante transação
+  this.disabled = true;
+  this.textContent = 'Reservando...';
+
+  try {
+    const nums = await reservarNumeros(solicitante, unidade, qty);
+    document.getElementById('modal-emit').classList.remove('open');
+    pendingEmit = null;
+    document.getElementById('inp-solicitante').value = '';
+    document.getElementById('inp-unidade').value = '';
+    document.getElementById('inp-qty').value = 1;
+    document.getElementById('btn-emit').disabled = true;
+    updateQtyPreview();
+
+    const msg = qty === 1
+      ? `${tipo.abbr} nº ${nums[0]} reservado`
+      : `${qty} números reservados: ${nums[0]} → ${nums[nums.length-1]}`;
+    showToast(msg);
+    // O onValue do Firebase já vai atualizar o render automaticamente
+  } catch(err) {
+    console.error(err);
+    showToast('Erro ao reservar. Tente novamente.');
+  } finally {
+    this.disabled = false;
+    this.textContent = 'Confirmar';
+  }
+});
+
+/* ── MODAL PROAD ── */
+function openProadModal(docKey) {
+  const ts = getTypeState();
+  const tipo = TIPOS.find(t => t.id === activeType);
+  pendingProad = { docKey };
+  const d = ts.docs[docKey];
+  document.getElementById('proad-modal-ref').textContent = `${tipo.label} nº ${d.numero}`;
+  const inp = document.getElementById('inp-proad');
+  inp.value = d.proad || '';
+  document.getElementById('btn-proad-confirm').disabled = !inp.value.trim();
+  document.getElementById('modal-proad').classList.add('open');
+  inp.focus();
+  inp.select();
+}
+
+document.getElementById('inp-proad').addEventListener('input', function() {
+  document.getElementById('btn-proad-confirm').disabled = !this.value.trim();
+});
+document.getElementById('inp-proad').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !document.getElementById('btn-proad-confirm').disabled) saveProad();
+});
+document.getElementById('btn-proad-cancel').addEventListener('click', closeProadModal);
+document.getElementById('modal-proad').addEventListener('click', function(e) {
+  if (e.target === this) closeProadModal();
+});
+document.getElementById('btn-proad-confirm').addEventListener('click', saveProad);
+
+function closeProadModal() {
+  document.getElementById('modal-proad').classList.remove('open');
+  pendingProad = null;
+}
+
+async function saveProad() {
+  if (pendingProad === null) return;
+  const val = document.getElementById('inp-proad').value.trim();
+  if (!val) return;
+  try {
+    await salvarProad(pendingProad.docKey, val);
+    closeProadModal();
+    showToast('PROAD ' + val + ' vinculado com sucesso');
+  } catch(err) {
+    showToast('Erro ao salvar PROAD. Tente novamente.');
+  }
+}
+
+/* ── MODAL DJE ── */
+let pendingDje = null;
+let djePublicadoTemp = false;
+
+function openDjeModal(docKey) {
+  const ts = getTypeState();
+  pendingDje = { docKey };
+  const d = ts.docs[docKey];
+  djePublicadoTemp = !!d.publicado;
+
+  document.getElementById('dje-modal-ref').textContent = `Decreto Judiciário nº ${d.numero}`;
+  document.getElementById('inp-dje').value = d.dje || '';
+  atualizarToggleUI();
+  document.getElementById('modal-dje').classList.add('open');
+  document.getElementById('inp-dje').focus();
+}
+
+function atualizarToggleUI() {
+  const sw = document.getElementById('toggle-switch');
+  const sub = document.getElementById('pub-toggle-sub');
+  if (djePublicadoTemp) {
+    sw.classList.add('on');
+    sub.textContent = 'Marcado como publicado ✓';
+  } else {
+    sw.classList.remove('on');
+    sub.textContent = 'Clique para marcar como publicado';
+  }
+}
+
+function togglePublicado() {
+  djePublicadoTemp = !djePublicadoTemp;
+  atualizarToggleUI();
+}
+
+document.getElementById('inp-dje').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') saveDje();
+});
+document.getElementById('btn-dje-cancel').addEventListener('click', closeDjeModal);
+document.getElementById('modal-dje').addEventListener('click', function(e) {
+  if (e.target === this) closeDjeModal();
+});
+document.getElementById('btn-dje-confirm').addEventListener('click', saveDje);
+
+function closeDjeModal() {
+  document.getElementById('modal-dje').classList.remove('open');
+  pendingDje = null;
+}
+
+async function saveDje() {
+  if (!pendingDje) return;
+  const dje = document.getElementById('inp-dje').value.trim();
+  try {
+    await salvarDJE(pendingDje.docKey, dje, djePublicadoTemp);
+    closeDjeModal();
+    const msg = dje
+      ? `DJE ${dje} vinculado — ${djePublicadoTemp ? 'Publicado' : 'Não publicado'}`
+      : `Status de publicação atualizado`;
+    showToast(msg);
+  } catch(err) {
+    showToast('Erro ao salvar DJE. Tente novamente.');
+  }
+}
+
+/* ── TOGGLE RÁPIDO DE PUBLICADO (direto na tabela) ── */
+async function quickTogglePublicado(docKey, publicadoAtual) {
+  try {
+    await togglePublicadoFirebase(docKey, !publicadoAtual);
+    showToast(!publicadoAtual ? 'Marcado como publicado' : 'Marcado como não publicado');
+  } catch(err) {
+    showToast('Erro ao atualizar. Tente novamente.');
+  }
+}
+
+/* ── BUSCA ── */
+document.getElementById('inp-busca').addEventListener('input', function() {
+  renderTable(this.value.trim());
+});
+
+/* ── EXPORT CSV ── */
+document.getElementById('btn-export').addEventListener('click', function() {
+  const ts = getTypeState();
+  const tipo = TIPOS.find(t => t.id === activeType);
+  const docs = Object.values(ts.docs || {});
+  if (!docs.length) { showToast('Nenhum documento para exportar'); return; }
+  const isDecreto = activeType === 'decreto';
+  const header = isDecreto
+    ? ['Tipo','Número','Solicitante','Unidade','Nº PROAD','Nº DJE','Publicado','Data','Hora']
+    : ['Tipo','Número','Solicitante','Unidade','Nº PROAD','Data','Hora'];
+  const rows = [header];
+  [...docs].sort((a, b) => a.seq - b.seq).forEach(d => {
+    const dt = new Date(d.ts);
+    const row = [
+      tipo.label,
+      d.numero,
+      '"' + d.solicitante.replace(/"/g,'""') + '"',
+      '"' + d.unidade.replace(/"/g,'""') + '"',
+      d.proad || '',
+    ];
+    if (isDecreto) {
+      row.push(d.dje || '');
+      row.push(d.publicado ? 'Sim' : 'Não');
+    }
+    row.push(dt.toLocaleDateString('pt-BR'));
+    row.push(dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}));
+    rows.push(row);
+  });
+  const csv = rows.map(r => r.join(';')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'}));
+  a.download = tipo.id + '-' + anoAtual() + '.csv';
+  a.click();
+  showToast('CSV exportado');
+});
+
+/* ── MOBILE MENU ── */
+function openMobileMenu() {
+  document.getElementById('sidebar-overlay').classList.add('open');
+  document.getElementById('sidebar-mobile').classList.add('open');
+}
+function closeMobileMenu() {
+  document.getElementById('sidebar-overlay').classList.remove('open');
+  document.getElementById('sidebar-mobile').classList.remove('open');
+}
+
+/* ── TOAST ── */
+let toastTimer;
+function showToast(msg) {
+  clearTimeout(toastTimer);
+  const t = document.getElementById('toast');
+  t.textContent = '✓  ' + msg;
+  t.classList.add('show');
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
+}
+
+/* ── ESC ── */
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    document.getElementById('modal-emit').classList.remove('open');
+    document.getElementById('modal-proad').classList.remove('open');
+    document.getElementById('modal-dje').classList.remove('open');
+    pendingEmit = null;
+    pendingProad = null;
+    pendingDje = null;
+  }
+});
+
+/* ── INIT ── */
+initFirebase();
+
+// Expor funções globais (necessário porque script é type="module")
+window.openProadModal      = openProadModal;
+window.openDjeModal        = openDjeModal;
+window.quickTogglePublicado = quickTogglePublicado;
+window.togglePublicado     = togglePublicado;
+window.changeQty           = changeQty;
+window.openMobileMenu      = openMobileMenu;
+window.closeMobileMenu     = closeMobileMenu;
+</script>
+</body>
+</html>
